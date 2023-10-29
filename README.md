@@ -1,5 +1,5 @@
 # Console command
-Console addon for Godot 4.x
+Console command addon for Godot 4.x
 
 current version 0.1
 
