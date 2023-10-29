@@ -12,3 +12,4 @@ Features:
 - basic commands
 - command parameters type validation
 - output to display error, command results or informations
+- command optional parameters flag
