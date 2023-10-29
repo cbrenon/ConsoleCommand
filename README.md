@@ -10,4 +10,5 @@ Features:
 - command parameter autocomplete (with TAB)
 - history (navigation with UP/DOWN ARROW)
 - basic commands
+- command parameters type validation
 - output to display error, command results or informations
