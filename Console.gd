@@ -41,10 +41,12 @@ class Command:
 	var _function : Callable
 	var _description : String
 	var _parameters : Array[CommandParameter]
+	var _optional_parameters : bool
 
-	func _init(fnc : Callable, desc : String):
+	func _init(fnc : Callable, desc : String, optional_parameters : bool):
 		_function = fnc
 		_description = desc
+		_optional_parameters = optional_parameters
 		
 	func add_parameter(type : ParameterType, name : String) -> CommandParameter:
 		var parameter := CommandParameter.new(type, name)
@@ -134,8 +136,8 @@ func _ready():
 	register_command("exit", exit, "Exit the game")
 	register_command("clear", clear_output, "Clear the output window")
 	register_command("close", close, "Close the console")
-	register_command("show_commands", show_commands, "Display all available commands")
-	var help_command := register_command("help", show_help, "Display command informations")
+	# register_command("show_commands", show_commands, "Display all available commands")
+	var help_command := register_command("?", help, "Show command list or command information", true)
 	help_command.add_parameter(ParameterType.STRING, "command_name")
 	register_command("pause", pause_game, "Pause the game")
 	register_command("resume", resume_game, "Resume the game")
@@ -183,28 +185,43 @@ func submit_command(command_line : String):
 		command_history.append(command_name)
 		command_history_index = -1
 		var command : Command = commands[command_name]
-		if command._parameters.size() != split_line.size() - 1:
-			output_error(command_name + " must be called with " + str(command._parameters.size()) + " parameters")
-		else:
+		if command._parameters.size() != (split_line.size() - 1):
+			if not command._optional_parameters:
+				output_error(command_name + " must be called with " + str(command._parameters.size()) + " parameters:")
+				output.newline()
+				help(command_name)
+				output.newline()
+				return
+			elif split_line.size() != 1:
+				output_error(command_name + " must be called with " + str(command._parameters.size()) + " parameters or 0 parameters:")
+				output.newline()
+				help(command_name)
+				output.newline()
+				return
+		if not command._optional_parameters:
 			var command_line_parameter_index := 1
 			for parameter in command._parameters:
 				if not parameter.validate(split_line[command_line_parameter_index]):
 					output_error("Invalide parameter " + split_line[command_line_parameter_index] + " (" + str(command_line_parameter_index - 1) + ").")
-					output_error("Parameter should be of type " + ParameterType.keys()[parameter._type].to_lower())
+					output_error("Parameter should be of type " + ParameterType.keys()[parameter._type].to_lower() + ":")
+					output.newline()
+					help(command_name)
+					output.newline()
 					return
-			var result = null
-			match command._parameters.size():
-				0: result = command._function.call()
-				1: result = command._function.call(command._parameters[0].value(split_line[1]))
-				2: result = command._function.call(command._parameters[0].value(split_line[1]), command._parameters[1].value(split_line[2]))
-				3: result = command._function.call(command._parameters[0].value(split_line[1]), command._parameters[1].value(split_line[2]), command._parameters[2].value(split_line[3]))
-				_: output_error("Currently console cannot manage " + str(command._parameters.size()) + " parameters")
-			if result != null:
-				assert(typeof(result) == TYPE_BOOL)
-				if not result:
-					output_error(command_line + " failed");
+		var result = null
+		match split_line.size() - 1:
+			0: result = command._function.call()
+			1: result = command._function.call(command._parameters[0].value(split_line[1]))
+			2: result = command._function.call(command._parameters[0].value(split_line[1]), command._parameters[1].value(split_line[2]))
+			3: result = command._function.call(command._parameters[0].value(split_line[1]), command._parameters[1].value(split_line[2]), command._parameters[2].value(split_line[3]))
+			_: output_error("Currently console cannot manage " + str(command._parameters.size()) + " parameters")
+		if result != null:
+			assert(typeof(result) == TYPE_BOOL)
+			if not result:
+				output_error(command_line + " failed");
 	else:
 		output_error("Unknown command: " + command_name);
+	output.newline()
 
 
 func on_command_changed():
@@ -302,8 +319,8 @@ func output_table(content : TableContent):
 	output.newline()
 
 
-func register_command(command_name : String, function : Callable, description : String = "none") -> Command:
-	commands[command_name] = Command.new(function, description)
+func register_command(command_name : String, function : Callable, description : String = "none", optional_parameters : bool = false) -> Command:
+	commands[command_name] = Command.new(function, description, optional_parameters)
 	sorted_commands.append(command_name)
 	sorted_commands.sort()
 	return commands[command_name]
@@ -328,21 +345,31 @@ func close() -> bool:
 	return true
 
 
-func show_commands() -> bool:
-	var table = TableContent.new(2, sorted_commands.size() + 1)
-	table.set_cell("[u]command:[/u]\t\t\t\t\t", 0, 0)
-	table.set_cell("[u]description:[/u]", 1, 0)
-	for i in sorted_commands.size():
-		table.set_cell(sorted_commands[i], 0, i + 1)
-		table.set_cell(commands[sorted_commands[i]]._description, 1, i + 1)
-	output_table(table)
-	return true
-
-
-func show_help(command_name : String) -> bool:
-	if commands.has(command_name):
-		output_message(commands[command_name]._description)
+func help(command_name : String = "") -> bool:
+	if command_name == "":
+		var table = TableContent.new(2, sorted_commands.size() + 1)
+		table.set_cell("[u]COMMAND[/u]\t\t\t\t\t", 0, 0)
+		table.set_cell("[u]DESCRIPTION[/u]", 1, 0)
+		for i in sorted_commands.size():
+			table.set_cell(sorted_commands[i], 0, i + 1)
+			table.set_cell(commands[sorted_commands[i]]._description, 1, i + 1)
+		output_table(table)
 		return true
+	if commands.has(command_name):
+		var command : Command = commands[command_name]
+		output_message(command._description)
+		if command._parameters.size() > 0:
+			output_message("\tParameters:")
+			var index := 1
+			for parameter in command._parameters:
+				output_message("\t\t" + str(index) + ": " + parameter._name + " (" + ParameterType.keys()[parameter._type].to_lower() + ")")
+				if parameter._values.size() > 0:
+					var choices_list : String = parameter._values[0]
+					for i in range(1, parameter._values.size()):
+						choices_list += ", " + parameter._values[i]
+					output_message("\t\t\tvalues: " + choices_list)
+		return true
+	output_error("Unknown command " + command_name)
 	return false
 
 
