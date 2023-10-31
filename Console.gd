@@ -7,7 +7,7 @@ const CONSOLE_FONT_RESOURCE			:= preload("res://addons/Console/consola.ttf")
 enum ParameterType { UNKNOWN, INT, FLOAT, BOOL, STRING }
 
 
-class CommandParameter:
+class CommandParameterInfo:
 	var _name : String
 	var _type : ParameterType = ParameterType.UNKNOWN
 	var _values : Array[String]
@@ -40,7 +40,7 @@ class CommandParameter:
 class Command:
 	var _function : Callable
 	var _description : String
-	var _parameters : Array[CommandParameter]
+	var _parameters_infos : Array[CommandParameterInfo]
 	var _optional_parameters : bool
 
 	func _init(fnc : Callable, desc : String, optional_parameters : bool):
@@ -48,10 +48,10 @@ class Command:
 		_description = desc
 		_optional_parameters = optional_parameters
 		
-	func add_parameter(type : ParameterType, name : String) -> CommandParameter:
-		var parameter := CommandParameter.new(type, name)
-		_parameters.append(parameter)
-		return parameter
+	func add_parameter_info(type : ParameterType, name : String) -> CommandParameterInfo:
+		var parameter_info := CommandParameterInfo.new(type, name)
+		_parameters_infos.append(parameter_info)
+		return parameter_info
 
 
 class TableContent:
@@ -133,14 +133,23 @@ func _ready():
 	control.visible = false
 	process_mode = PROCESS_MODE_ALWAYS
 
-	register_command("exit", exit, "Exit the game")
-	register_command("clear", clear_output, "Clear the output window")
-	register_command("close", close, "Close the console")
-	# register_command("show_commands", show_commands, "Display all available commands")
 	var help_command := register_command("?", help, "Show command list or command information", true)
-	help_command.add_parameter(ParameterType.STRING, "command_name")
+	var help_command_parameter := help_command.add_parameter_info(ParameterType.STRING, "command_name")
+	
+	register_command("exit", exit, "Exit the game")
+	help_command_parameter.register_value("exit")
+	
+	register_command("clear", clear_output, "Clear the output window")
+	help_command_parameter.register_value("clear")
+	
+	register_command("close", close, "Close the console")
+	help_command_parameter.register_value("close")
+	
 	register_command("pause", pause_game, "Pause the game")
+	help_command_parameter.register_value("pause")
+	
 	register_command("resume", resume_game, "Resume the game")
+	help_command_parameter.register_value("resume")
 
 
 func _input(event : InputEvent):
@@ -185,36 +194,35 @@ func submit_command(command_line : String):
 		command_history.append(command_name)
 		command_history_index = -1
 		var command : Command = commands[command_name]
-		if command._parameters.size() != (split_line.size() - 1):
+		if command._parameters_infos.size() != (split_line.size() - 1):
 			if not command._optional_parameters:
-				output_error(command_name + " must be called with " + str(command._parameters.size()) + " parameters:")
+				output_error(command_name + " must be called with " + str(command._parameters_infos.size()) + " parameters:")
 				output.newline()
 				help(command_name)
 				output.newline()
 				return
 			elif split_line.size() != 1:
-				output_error(command_name + " must be called with " + str(command._parameters.size()) + " parameters or 0 parameters:")
+				output_error(command_name + " must be called with " + str(command._parameters_infos.size()) + " parameters or 0 parameters:")
 				output.newline()
 				help(command_name)
 				output.newline()
 				return
-		if not command._optional_parameters:
-			var command_line_parameter_index := 1
-			for parameter in command._parameters:
-				if not parameter.validate(split_line[command_line_parameter_index]):
-					output_error("Invalide parameter " + split_line[command_line_parameter_index] + " (" + str(command_line_parameter_index - 1) + ").")
-					output_error("Parameter should be of type " + ParameterType.keys()[parameter._type].to_lower() + ":")
-					output.newline()
-					help(command_name)
-					output.newline()
-					return
+		for i in range(1, split_line.size()):
+			var parameter_info := command._parameters_infos[i - 1]
+			if not parameter_info.validate(split_line[i]):
+				output_error("Invalide parameter " + split_line[i] + " (" + str(i) + ").")
+				output_error("Parameter should be of type " + ParameterType.keys()[parameter_info._type].to_lower() + ":")
+				output.newline()
+				help(command_name)
+				output.newline()
+				return
 		var result = null
 		match split_line.size() - 1:
 			0: result = command._function.call()
-			1: result = command._function.call(command._parameters[0].value(split_line[1]))
-			2: result = command._function.call(command._parameters[0].value(split_line[1]), command._parameters[1].value(split_line[2]))
-			3: result = command._function.call(command._parameters[0].value(split_line[1]), command._parameters[1].value(split_line[2]), command._parameters[2].value(split_line[3]))
-			_: output_error("Currently console cannot manage " + str(command._parameters.size()) + " parameters")
+			1: result = command._function.call(command._parameters_infos[0].value(split_line[1]))
+			2: result = command._function.call(command._parameters_infos[0].value(split_line[1]), command._parameters_infos[1].value(split_line[2]))
+			3: result = command._function.call(command._parameters_infos[0].value(split_line[1]), command._parameters_infos[1].value(split_line[2]), command._parameters_infos[2].value(split_line[3]))
+			_: output_error("Currently console cannot manage " + str(command._parameters_infos.size()) + " parameters")
 		if result != null:
 			assert(typeof(result) == TYPE_BOOL)
 			if not result:
@@ -261,11 +269,11 @@ func fill_command():
 		var command_name := split_line[0].to_lower()
 		if commands.has(command_name):
 			var command : Command = commands[command_name]
-			if command._parameters[cur_parameter_index]._values.size() > 0:
+			if command._parameters_infos[cur_parameter_index]._values.size() > 0:
 				suggested_parameter_value_index += 1
-				if suggested_parameter_value_index >= command._parameters[cur_parameter_index]._values.size():
+				if suggested_parameter_value_index >= command._parameters_infos[cur_parameter_index]._values.size():
 					suggested_parameter_value_index = 0
-				input.text = command_name + " " + command._parameters[cur_parameter_index]._values[suggested_parameter_value_index]
+				input.text = command_name + " " + command._parameters_infos[cur_parameter_index]._values[suggested_parameter_value_index]
 				input.set_caret_column(input.text.length())
 				pass
 
@@ -323,6 +331,10 @@ func register_command(command_name : String, function : Callable, description : 
 	commands[command_name] = Command.new(function, description, optional_parameters)
 	sorted_commands.append(command_name)
 	sorted_commands.sort()
+	if commands.has("?"):
+		var help_command : Command = commands["?"]
+		if help_command._parameters_infos.size() == 1:
+			help_command._parameters_infos[0].register_value(command_name)
 	return commands[command_name]
 
 
@@ -358,10 +370,10 @@ func help(command_name : String = "") -> bool:
 	if commands.has(command_name):
 		var command : Command = commands[command_name]
 		output_message(command._description)
-		if command._parameters.size() > 0:
+		if command._parameters_infos.size() > 0:
 			output_message("\tParameters:")
 			var index := 1
-			for parameter in command._parameters:
+			for parameter in command._parameters_infos:
 				output_message("\t\t" + str(index) + ": " + parameter._name + " (" + ParameterType.keys()[parameter._type].to_lower() + ")")
 				if parameter._values.size() > 0:
 					var choices_list : String = parameter._values[0]
