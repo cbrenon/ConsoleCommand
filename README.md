@@ -3,7 +3,7 @@ Console command addon for Godot 4.x
 
 current version 0.1
 
-It is a work in progress version. It is not suitable for production and it will heavily evolve with next iterations.
+It is a work in progress version. It is not suitable for production and it will heavily evolve with next iterations. Possible API compatibility breaks too.
 
 Features:
 - command autocomplete (with TAB)
