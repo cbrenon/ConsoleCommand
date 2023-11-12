@@ -42,11 +42,13 @@ class Command:
 	var _description : String
 	var _parameters_infos : Array[CommandParameterInfo]
 	var _optional_parameters : bool
+	var _show_validation : bool
 
-	func _init(fnc : Callable, desc : String, optional_parameters : bool):
+	func _init(fnc : Callable, desc : String, optional_parameters : bool, show_validation : bool):
 		_function = fnc
 		_description = desc
 		_optional_parameters = optional_parameters
+		_show_validation = show_validation
 		
 	func add_parameter_info(type : ParameterType, name : String) -> CommandParameterInfo:
 		var parameter_info := CommandParameterInfo.new(type, name)
@@ -133,22 +135,22 @@ func _ready():
 	control.visible = false
 	process_mode = PROCESS_MODE_ALWAYS
 
-	var help_command := register_command("?", help, "Show command list or command information", true)
+	var help_command := register_command("?", help, "Show command list or command information", true, false)
 	var help_command_parameter := help_command.add_parameter_info(ParameterType.STRING, "command_name")
 	
-	register_command("exit", exit, "Exit the game")
+	register_command("exit", exit, "Exit the game", false, false)
 	help_command_parameter.register_value("exit")
 	
-	register_command("clear", clear_output, "Clear the output window")
+	register_command("clear", clear_output, "Clear the output window", false, false)
 	help_command_parameter.register_value("clear")
 	
-	register_command("close", close, "Close the console")
+	register_command("close", close, "Close the console", false, false)
 	help_command_parameter.register_value("close")
 	
-	register_command("pause", pause_game, "Pause the game")
+	register_command("pause", pause_game, "Pause the game", false, true)
 	help_command_parameter.register_value("pause")
 	
-	register_command("resume", resume_game, "Resume the game")
+	register_command("resume", resume_game, "Resume the game", false, true)
 	help_command_parameter.register_value("resume")
 
 
@@ -226,7 +228,9 @@ func submit_command(command_line : String):
 		if result != null:
 			assert(typeof(result) == TYPE_BOOL)
 			if not result:
-				output_error(command_line + " failed");
+				output_error("\"" + command_line + "\" failed");
+			elif command._show_validation:
+				output_message("\"" + command_line + "\" succeeded")
 	else:
 		output_error("Unknown command: " + command_name);
 	output.newline()
@@ -327,8 +331,8 @@ func output_table(content : TableContent):
 	output.newline()
 
 
-func register_command(command_name : String, function : Callable, description : String = "none", optional_parameters : bool = false) -> Command:
-	commands[command_name] = Command.new(function, description, optional_parameters)
+func register_command(command_name : String, function : Callable, description : String = "none", optional_parameters : bool = false, show_validation : bool = true) -> Command:
+	commands[command_name] = Command.new(function, description, optional_parameters, show_validation)
 	sorted_commands.append(command_name)
 	sorted_commands.sort()
 	if commands.has("?"):
