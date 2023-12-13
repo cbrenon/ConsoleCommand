@@ -13,3 +13,5 @@ Features:
 - command parameters type validation
 - output to display error, command results or informations
 - command optional parameters flag
+
+![Alt text](screenshot_ex.png?raw=true "screenshot example")
