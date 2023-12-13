@@ -3,9 +3,9 @@ extends Node
 const CONSOLE_BACKGROUND_RESOURCE	:= preload("res://addons/Console/ConsoleBackground.tres")
 const CONSOLE_FONT_RESOURCE			:= preload("res://addons/Console/consola.ttf")
 
+const PROMPT_TEXT := "> "
 
 enum ParameterType { UNKNOWN, INT, FLOAT, BOOL, STRING }
-
 
 class CommandParameterInfo:
 	var _name : String
@@ -58,27 +58,32 @@ class Command:
 
 class TableContent:
 	var _cells : Array[String]
-	var _col_count : int = 0
-	var _row_count : int = 0
+	var _col_count := 0
+	var _row_count := 0
+	var _has_title := false
+	var _max_text_length := 0
 
-	func _init(col_count : int, row_count):
+	func _init(col_count : int, row_count : int, has_title : bool = false):
 		assert(col_count > 0)
 		assert(row_count > 0)
 		_cells.resize(col_count * row_count)
 		_col_count = col_count
 		_row_count = row_count
+		_has_title = has_title
 
 	func set_cell(text : String, col_index : int, row_index : int):
 		assert(row_index < _row_count)
 		assert(col_index < _col_count)
 		_cells[col_index + row_index * _col_count] = text
+		if text.length() > _max_text_length:
+			_max_text_length = text.length()
 
 
 # API PROPERTIES ===============================================================
 
 
 var activation_key	:= KEY_QUOTELEFT
-var font_size		:= 24
+var font_size		:= 32
 
 
 # INTERNAL PROPERTIES ==========================================================
@@ -125,6 +130,8 @@ func _ready():
 	input.anchor_top = 0.9
 	input.anchor_bottom = 1.0
 	input.anchor_right = 1.0
+	input.text = PROMPT_TEXT
+	input.set_caret_column(PROMPT_TEXT.length())
 	input.add_theme_stylebox_override("normal", CONSOLE_BACKGROUND_RESOURCE)
 	input.add_theme_font_override("font", CONSOLE_FONT_RESOURCE)
 	input.add_theme_color_override("font_color", Color.GREEN)
@@ -162,7 +169,7 @@ func _input(event : InputEvent):
 			get_tree().get_root().set_input_as_handled()
 		if control.visible and event.pressed:
 			if event.get_physical_keycode_with_modifiers() == KEY_ENTER:
-				submit_command(input.text)
+				submit_command(input.text.substr(PROMPT_TEXT.length()))
 				get_tree().get_root().set_input_as_handled()
 			if event.get_physical_keycode_with_modifiers() == KEY_TAB:
 				fill_command()
@@ -179,13 +186,24 @@ func _input(event : InputEvent):
 				else:
 					get_tree().get_root().set_input_as_handled()
 			elif event.get_physical_keycode_with_modifiers() == KEY_BACKSPACE:
-				if input.get_caret_column() != 0 and input.text[input.get_caret_column() - 1] == ' ':
+				if input.get_caret_column() <= PROMPT_TEXT.length():
+					get_tree().get_root().set_input_as_handled()
+				elif input.text[input.get_caret_column() - 1] == ' ':
 					cur_parameter_index -= 1
 
 
 func submit_command(command_line : String):
 	
-	input.clear()
+	const MAX_CHAR_COUNT_PER_LINE := 100;
+	output.append_text("[color=green]┫" + command_line + "┣[/color]")
+	for i in range(command_line.length(), MAX_CHAR_COUNT_PER_LINE):
+		output.append_text("[color=green]━[/color]")
+	output.newline()
+	output.newline()
+	
+	input.text = PROMPT_TEXT
+	input.set_caret_column(PROMPT_TEXT.length())
+	
 	cur_parameter_index = -1
 	suggested_parameter_value_index = -1
 
@@ -228,11 +246,11 @@ func submit_command(command_line : String):
 		if result != null:
 			assert(typeof(result) == TYPE_BOOL)
 			if not result:
-				output_error("\"" + command_line + "\" failed");
+				output_error("\"" + command_line + "\" failed")
 			elif command._show_validation:
 				output_message("\"" + command_line + "\" succeeded")
 	else:
-		output_error("Unknown command: " + command_name);
+		output_error("Unknown command: " + command_name)
 	output.newline()
 
 
@@ -249,7 +267,8 @@ func toggle():
 	else:
 		suggested_commands.clear()
 		suggested_command_index = -1
-		input.clear()
+		input.text = PROMPT_TEXT
+		input.set_caret_column(PROMPT_TEXT.length())
 		cur_parameter_index = -1
 		suggested_parameter_value_index = -1
 		if not pause_game_on:
@@ -260,16 +279,16 @@ func fill_command():
 	if cur_parameter_index == -1:
 		if suggested_command_index == -1:
 			for command in sorted_commands:
-				if command.contains(input.text) and not suggested_commands.has(command):
+				if command.contains(input.text.substr(PROMPT_TEXT.length())) and not suggested_commands.has(command):
 					suggested_commands.append(command)
 		if suggested_commands.size() > 0:
 			suggested_command_index += 1
 			if suggested_command_index >= suggested_commands.size():
 				suggested_command_index = 0
-			input.text = suggested_commands[suggested_command_index]
+			input.text = PROMPT_TEXT + suggested_commands[suggested_command_index]
 			input.set_caret_column(input.text.length())
 	else:
-		var split_line := input.text.split(" ")
+		var split_line := input.text.substr(PROMPT_TEXT.length()).split(" ")
 		var command_name := split_line[0].to_lower()
 		if commands.has(command_name):
 			var command : Command = commands[command_name]
@@ -277,7 +296,7 @@ func fill_command():
 				suggested_parameter_value_index += 1
 				if suggested_parameter_value_index >= command._parameters_infos[cur_parameter_index]._values.size():
 					suggested_parameter_value_index = 0
-				input.text = command_name + " " + command._parameters_infos[cur_parameter_index]._values[suggested_parameter_value_index]
+				input.text = PROMPT_TEXT + command_name + " " + command._parameters_infos[cur_parameter_index]._values[suggested_parameter_value_index]
 				input.set_caret_column(input.text.length())
 				pass
 
@@ -290,9 +309,10 @@ func show_command_history_backward():
 			command_history_index -= 1
 		if command_history_index < 0:
 			command_history_index = -1
-			input.clear()
+			input.text = PROMPT_TEXT
+			input.set_caret_column(PROMPT_TEXT.length())
 		else:
-			input.text = command_history[command_history_index]
+			input.text = PROMPT_TEXT + command_history[command_history_index]
 			input.set_caret_column(input.text.length())
 
 
@@ -304,14 +324,15 @@ func show_command_history_foreward():
 			command_history_index += 1
 		if command_history_index >= command_history.size():
 			command_history_index = -1
-			input.clear()
+			input.text = PROMPT_TEXT
+			input.set_caret_column(PROMPT_TEXT.length())
 		else:
-			input.text = command_history[command_history_index]
+			input.text = PROMPT_TEXT + command_history[command_history_index]
 			input.set_caret_column(input.text.length())
 
 
 func output_error(message : String):
-	output.append_text("[color=red]" + message + "[/color]")
+	output.append_text("[color=green][/color][color=red]" + message + "[/color]")
 	output.newline()
 
 
@@ -321,11 +342,46 @@ func output_message(message : String):
 
 
 func output_table(content : TableContent):
-	output.push_table(content._col_count)
-	for i in content._row_count:
-		for j in content._col_count:
+	
+	# content row count + top line + bottom line
+	var row_count := content._row_count + 2
+	# content col count + content col count - 1 for intermadiate vertical lines between column + left line + right line => which can be simplified by result below
+	var col_count := content._col_count * 2 + 1
+	output.push_table(col_count)
+	var text_index := 0
+	for i in row_count:
+		for j in col_count:
 			output.push_cell()
-			output_message(content._cells[j + i * content._col_count])
+			if i == 0:
+				if j == 0:
+					output.append_text("[color=green]┌[/color]")
+				elif j == col_count - 1:
+					output.append_text("[color=green]┐[/color]")
+				elif j % 2 == 0:
+					output.append_text("[color=green]┬[/color]")
+				else:
+					for k in content._max_text_length:
+						output.append_text("[color=green]─[/color]")
+			elif i == row_count - 1:
+				if j == 0:
+					output.append_text("[color=green]└[/color]")
+				elif j == col_count - 1:
+					output.append_text("[color=green]┘[/color]")
+				elif j % 2 == 0:
+					output.append_text("[color=green]┴[/color]")
+				else:
+					for k in content._max_text_length:
+						output.append_text("[color=green]─[/color]")
+			else:
+				if j == 0:
+					output.append_text("[color=green]│[/color]")
+				elif j == col_count - 1:
+					output.append_text("[color=green]│[/color]")
+				elif j % 2 == 0:
+					output.append_text("[color=green]│[/color]")
+				else:
+					output.append_text("[color=green]" + content._cells[text_index] + "[/color]")
+					text_index += 1
 			output.pop()
 	output.pop()
 	output.newline()
@@ -363,12 +419,10 @@ func close() -> bool:
 
 func help(command_name : String = "") -> bool:
 	if command_name == "":
-		var table = TableContent.new(2, sorted_commands.size() + 1)
-		table.set_cell("[u]COMMAND[/u]\t\t\t\t\t", 0, 0)
-		table.set_cell("[u]DESCRIPTION[/u]", 1, 0)
+		var table = TableContent.new(2, sorted_commands.size())
 		for i in sorted_commands.size():
-			table.set_cell(sorted_commands[i], 0, i + 1)
-			table.set_cell(commands[sorted_commands[i]]._description, 1, i + 1)
+			table.set_cell(sorted_commands[i], 0, i)
+			table.set_cell(commands[sorted_commands[i]]._description, 1, i)
 		output_table(table)
 		return true
 	if commands.has(command_name):
