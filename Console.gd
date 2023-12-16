@@ -3,7 +3,7 @@ extends Node
 const CONSOLE_BACKGROUND_RESOURCE	:= preload("res://addons/Console/ConsoleBackground.tres")
 const CONSOLE_FONT_RESOURCE			:= preload("res://addons/Console/consola.ttf")
 
-const PROMPT_TEXT := "> "
+const PROMPT_TEXT := "┫▶ "
 
 enum ParameterType { UNKNOWN, INT, FLOAT, BOOL, STRING }
 
@@ -101,6 +101,8 @@ var command_history         		:= []
 var command_history_index   		:= -1
 var pause_game_on					:= false
 var cur_parameter_index				:= -1
+var last_command_result_as_string	:= ""
+var last_command_result_as_table	: TableContent
 
 
 # FUNCTIONS ====================================================================
@@ -136,28 +138,28 @@ func _ready():
 	input.add_theme_font_override("font", CONSOLE_FONT_RESOURCE)
 	input.add_theme_color_override("font_color", Color.GREEN)
 	input.add_theme_font_size_override("font_size", font_size)
-	input.text_changed.connect(on_command_changed)
+	input.text_changed.connect(_on_command_changed)
 	control.add_child(input)
 
 	control.visible = false
 	process_mode = PROCESS_MODE_ALWAYS
 
-	var help_command := register_command("?", help, "Show command list or command information", true, false)
+	var help_command := register_command("?", _help, "Show command list or command information", true, false)
 	var help_command_parameter := help_command.add_parameter_info(ParameterType.STRING, "command_name")
 	
-	register_command("exit", exit, "Exit the game", false, false)
+	register_command("exit", _exit, "Exit the game", false, false)
 	help_command_parameter.register_value("exit")
 	
-	register_command("clear", clear_output, "Clear the output window", false, false)
+	register_command("clear", _clear_output, "Clear the output window", false, false)
 	help_command_parameter.register_value("clear")
 	
-	register_command("close", close, "Close the console", false, false)
+	register_command("close", _close, "Close the console", false, false)
 	help_command_parameter.register_value("close")
 	
-	register_command("pause", pause_game, "Pause the game", false, true)
+	register_command("pause", _pause_game, "Pause the game", false, true)
 	help_command_parameter.register_value("pause")
 	
-	register_command("resume", resume_game, "Resume the game", false, true)
+	register_command("resume", _resume_game, "Resume the game", false, true)
 	help_command_parameter.register_value("resume")
 
 
@@ -165,20 +167,20 @@ func _input(event : InputEvent):
 	if event is InputEventKey:
 		if event.get_physical_keycode_with_modifiers() == activation_key:
 			if event.pressed:
-				toggle()
+				_toggle()
 			get_tree().get_root().set_input_as_handled()
 		if control.visible and event.pressed:
 			if event.get_physical_keycode_with_modifiers() == KEY_ENTER:
-				submit_command(input.text.substr(PROMPT_TEXT.length()))
+				_submit_command(input.text.substr(PROMPT_TEXT.length()))
 				get_tree().get_root().set_input_as_handled()
 			if event.get_physical_keycode_with_modifiers() == KEY_TAB:
-				fill_command()
+				_fill_command()
 				get_tree().get_root().set_input_as_handled()
 			elif event.get_physical_keycode_with_modifiers() == KEY_UP:
-				show_command_history_backward()
+				_show_command_history_backward()
 				get_tree().get_root().set_input_as_handled()
 			elif event.get_physical_keycode_with_modifiers() == KEY_DOWN:
-				show_command_history_foreward()
+				_show_command_history_foreward()
 				get_tree().get_root().set_input_as_handled()
 			elif event.get_physical_keycode_with_modifiers() == KEY_SPACE:
 				if input.get_caret_column() != 0 and input.text[input.get_caret_column() - 1] != ' ':
@@ -192,14 +194,7 @@ func _input(event : InputEvent):
 					cur_parameter_index -= 1
 
 
-func submit_command(command_line : String):
-	
-	const MAX_CHAR_COUNT_PER_LINE := 100;
-	output.append_text("[color=green]┫" + command_line + "┣[/color]")
-	for i in range(command_line.length(), MAX_CHAR_COUNT_PER_LINE):
-		output.append_text("[color=green]━[/color]")
-	output.newline()
-	output.newline()
+func _submit_command(command_line : String):
 	
 	input.text = PROMPT_TEXT
 	input.set_caret_column(PROMPT_TEXT.length())
@@ -209,6 +204,8 @@ func submit_command(command_line : String):
 
 	var split_line := command_line.split(" ")
 	var command_name := split_line[0].to_lower()
+	var succeeded := true
+	var result_msg := ""
 
 	if commands.has(command_name):
 		command_history.append(command_name)
@@ -216,50 +213,55 @@ func submit_command(command_line : String):
 		var command : Command = commands[command_name]
 		if command._parameters_infos.size() != (split_line.size() - 1):
 			if not command._optional_parameters:
-				output_error(command_name + " must be called with " + str(command._parameters_infos.size()) + " parameters:")
-				output.newline()
-				help(command_name)
-				output.newline()
-				return
+				result_msg = command_name +  " must be called with " + str(command._parameters_infos.size()) + " parameters"
+				succeeded = false
 			elif split_line.size() != 1:
-				output_error(command_name + " must be called with " + str(command._parameters_infos.size()) + " parameters or 0 parameters:")
-				output.newline()
-				help(command_name)
-				output.newline()
-				return
-		for i in range(1, split_line.size()):
-			var parameter_info := command._parameters_infos[i - 1]
-			if not parameter_info.validate(split_line[i]):
-				output_error("Invalide parameter " + split_line[i] + " (" + str(i) + ").")
-				output_error("Parameter should be of type " + ParameterType.keys()[parameter_info._type].to_lower() + ":")
-				output.newline()
-				help(command_name)
-				output.newline()
-				return
-		var result = null
-		match split_line.size() - 1:
-			0: result = command._function.call()
-			1: result = command._function.call(command._parameters_infos[0].value(split_line[1]))
-			2: result = command._function.call(command._parameters_infos[0].value(split_line[1]), command._parameters_infos[1].value(split_line[2]))
-			3: result = command._function.call(command._parameters_infos[0].value(split_line[1]), command._parameters_infos[1].value(split_line[2]), command._parameters_infos[2].value(split_line[3]))
-			_: output_error("Currently console cannot manage " + str(command._parameters_infos.size()) + " parameters")
-		if result != null:
-			assert(typeof(result) == TYPE_BOOL)
-			if not result:
-				output_error("\"" + command_line + "\" failed")
-			elif command._show_validation:
-				output_message("\"" + command_line + "\" succeeded")
+				result_msg = command_name + " must be called with " + str(command._parameters_infos.size()) + " parameters or 0 parameters"
+				succeeded = false
+		if succeeded:
+			for i in range(1, split_line.size()):
+				var parameter_info := command._parameters_infos[i - 1]
+				if not parameter_info.validate(split_line[i]):
+					result_msg = "invalid parameter " + split_line[i] + " (" + str(i) + "). Parameter (" + str(i) + ") should be of type " + ParameterType.keys()[parameter_info._type].to_lower()
+					succeeded = false
+			if succeeded:
+				var result = null
+				match split_line.size() - 1:
+					0: result = command._function.call()
+					1: result = command._function.call(command._parameters_infos[0].value(split_line[1]))
+					2: result = command._function.call(command._parameters_infos[0].value(split_line[1]), command._parameters_infos[1].value(split_line[2]))
+					3: result = command._function.call(command._parameters_infos[0].value(split_line[1]), command._parameters_infos[1].value(split_line[2]), command._parameters_infos[2].value(split_line[3]))
+					_: result_msg = "currently console cannot manage " + str(command._parameters_infos.size()) + " parameters"
+				if result != null:
+					assert(typeof(result) == TYPE_BOOL)
+					if not result:
+						succeeded = false
 	else:
-		output_error("Unknown command: " + command_name)
-	output.newline()
+		succeeded = false
+		result_msg = "unknown command"
+	
+	if succeeded:
+		_output_message(" ▶ " + command_line + " ▶ ✔️")
+		_output_message("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		if not last_command_result_as_string.is_empty():
+			_output_message(last_command_result_as_string)
+		if last_command_result_as_table != null:
+			_output_table(last_command_result_as_table)
+	else:
+		var error_msg = last_command_result_as_string if not last_command_result_as_string.is_empty() else result_msg
+		_output_message(" ▶ " + command_line + " ▶ ❌ ▶ " + error_msg)
+		_output_message("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	
+	last_command_result_as_string = ""
+	last_command_result_as_table = null
 
 
-func on_command_changed():
+func _on_command_changed():
 	suggested_commands.clear()
 	suggested_command_index = -1
 
 
-func toggle():
+func _toggle():
 	control.visible = !control.visible
 	if control.visible:
 		get_tree().paused = true
@@ -275,7 +277,7 @@ func toggle():
 			get_tree().paused = false
 
 
-func fill_command():
+func _fill_command():
 	if cur_parameter_index == -1:
 		if suggested_command_index == -1:
 			for command in sorted_commands:
@@ -301,7 +303,7 @@ func fill_command():
 				pass
 
 
-func show_command_history_backward():
+func _show_command_history_backward():
 	if command_history.size() > 0:
 		if command_history_index == -1:
 			command_history_index = command_history.size() - 1
@@ -316,7 +318,7 @@ func show_command_history_backward():
 			input.set_caret_column(input.text.length())
 
 
-func show_command_history_foreward():
+func _show_command_history_foreward():
 	if command_history.size() > 0:
 		if command_history_index == -1:
 			command_history_index = 0
@@ -331,17 +333,17 @@ func show_command_history_foreward():
 			input.set_caret_column(input.text.length())
 
 
-func output_error(message : String):
+func _output_error(message : String):
 	output.append_text("[color=green][/color][color=red]" + message + "[/color]")
 	output.newline()
 
 
-func output_message(message : String):
+func _output_message(message : String):
 	output.append_text("[color=green]" + message + "[/color]")
 	output.newline()
 
 
-func output_table(content : TableContent):
+func _output_table(content : TableContent):
 	
 	# content row count + top line + bottom line
 	var row_count := content._row_count + 2
@@ -387,6 +389,9 @@ func output_table(content : TableContent):
 	output.newline()
 
 
+# API COMMANDS =================================================================
+
+
 func register_command(command_name : String, function : Callable, description : String = "none", optional_parameters : bool = false, show_validation : bool = true) -> Command:
 	commands[command_name] = Command.new(function, description, optional_parameters, show_validation)
 	sorted_commands.append(command_name)
@@ -398,56 +403,76 @@ func register_command(command_name : String, function : Callable, description : 
 	return commands[command_name]
 
 
+func set_command_result_as_string(str : String):
+	last_command_result_as_string = str
+	
+	
+func set_command_result_as_table(table : TableContent):
+	last_command_result_as_table = table
+	
+
 # DEFAULT COMMANDS =============================================================
 
 
-func exit() -> bool:
+func _exit() -> bool:
 	get_tree().root.propagate_notification(NOTIFICATION_WM_CLOSE_REQUEST)
 	get_tree().quit()
 	return true
 
 
-func clear_output() -> bool:
+func _clear_output() -> bool:
 	output.clear()
 	return true
 
 
-func close() -> bool:
-	toggle()
+func _close() -> bool:
+	_toggle()
 	return true
 
 
-func help(command_name : String = "") -> bool:
+func _help(command_name : String = "") -> bool:
 	if command_name == "":
 		var table = TableContent.new(2, sorted_commands.size())
 		for i in sorted_commands.size():
 			table.set_cell(sorted_commands[i], 0, i)
 			table.set_cell(commands[sorted_commands[i]]._description, 1, i)
-		output_table(table)
+		set_command_result_as_table(table)
 		return true
 	if commands.has(command_name):
-		var command : Command = commands[command_name]
-		output_message(command._description)
-		if command._parameters_infos.size() > 0:
-			output_message("\tParameters:")
-			var index := 1
+		var command : Command = commands[command_name]		
+		if command._parameters_infos.is_empty():
+			var table = TableContent.new(2, 1)
+			table.set_cell(command_name, 0, 0)
+			table.set_cell(command._description, 1, 0)
+			set_command_result_as_table(table)
+		else:
+			var row_count = command._parameters_infos.size() + 2 # the header and one for "parameters"
 			for parameter in command._parameters_infos:
-				output_message("\t\t" + str(index) + ": " + parameter._name + " (" + ParameterType.keys()[parameter._type].to_lower() + ")")
-				if parameter._values.size() > 0:
-					var choices_list : String = parameter._values[0]
-					for i in range(1, parameter._values.size()):
-						choices_list += ", " + parameter._values[i]
-					output_message("\t\t\tvalues: " + choices_list)
+				row_count += parameter._values.size()
+			var table = TableContent.new(2, row_count)
+			table.set_cell(command_name, 0, 0)
+			table.set_cell(command._description, 1, 0)
+			table.set_cell("   Parameters:", 1, 1)
+			var row_index = 2
+			var parameter_index = 1
+			for parameter in command._parameters_infos:
+				table.set_cell("      " + str(parameter_index) + ". " + parameter._name + ": " + ParameterType.keys()[parameter._type].to_lower(), 1, row_index)
+				row_index += 1
+				parameter_index += 1
+				for value in parameter._values:
+					table.set_cell("         ▸ " + value, 1, row_index)
+					row_index += 1
+			set_command_result_as_table(table)
 		return true
-	output_error("Unknown command " + command_name)
+	set_command_result_as_string("unknown command " + command_name)
 	return false
 
 
-func pause_game() -> bool:
+func _pause_game() -> bool:
 	pause_game_on = true
 	return true
 
 
-func resume_game() -> bool:
+func _resume_game() -> bool:
 	pause_game_on = false
 	return true
