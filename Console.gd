@@ -3,7 +3,12 @@ extends Node
 const CONSOLE_BACKGROUND_RESOURCE	:= preload("res://addons/Console/ConsoleBackground.tres")
 const CONSOLE_FONT_RESOURCE			:= preload("res://addons/Console/consola.ttf")
 
-const PROMPT_TEXT := "┫▶ "
+const PROMPT_TEXT 				:= "┫▶ "
+const MAX_CHAR_COUNT_PER_LINE	:= 180
+const ACTIVATION_KEY			:= KEY_QUOTELEFT
+const FONT_SIZE					:= 32
+const OUTPUT_DEFAULT_TEXT_COLOR	:= Color(1.0, 0.6, 0.0)
+const COMMAND_LINE_TEXT_COLOR	:= Color(1.0, 0.5, 0.0)
 
 enum ParameterType { UNKNOWN, INT, FLOAT, BOOL, STRING }
 
@@ -79,13 +84,6 @@ class TableContent:
 			_max_text_length = text.length()
 
 
-# API PROPERTIES ===============================================================
-
-
-var activation_key	:= KEY_QUOTELEFT
-var font_size		:= 32
-
-
 # INTERNAL PROPERTIES ==========================================================
 
 @onready var control				:= Control.new()
@@ -122,11 +120,13 @@ func _ready():
 	output.anchor_right = 1.0
 	output.scroll_following = true
 	output.bbcode_enabled = true
+	# output.modulate = command_line_text_color
 	output.add_theme_stylebox_override("normal", CONSOLE_BACKGROUND_RESOURCE)
 	output.add_theme_font_override("normal_font", CONSOLE_FONT_RESOURCE)
-	output.add_theme_font_size_override("normal_font_size", font_size)
+	output.add_theme_font_size_override("normal_font_size", FONT_SIZE)
 	output.add_theme_font_override("bold_font", CONSOLE_FONT_RESOURCE)
-	output.add_theme_font_size_override("bold_font_size", font_size)
+	output.add_theme_color_override("default_color", OUTPUT_DEFAULT_TEXT_COLOR)
+	output.add_theme_font_size_override("bold_font_size", FONT_SIZE)
 	control.add_child(output)
 
 	input.anchor_top = 0.9
@@ -136,8 +136,8 @@ func _ready():
 	input.set_caret_column(PROMPT_TEXT.length())
 	input.add_theme_stylebox_override("normal", CONSOLE_BACKGROUND_RESOURCE)
 	input.add_theme_font_override("font", CONSOLE_FONT_RESOURCE)
-	input.add_theme_color_override("font_color", Color.GREEN)
-	input.add_theme_font_size_override("font_size", font_size)
+	input.add_theme_color_override("font_color", COMMAND_LINE_TEXT_COLOR)
+	input.add_theme_font_size_override("font_size", FONT_SIZE)
 	input.text_changed.connect(_on_command_changed)
 	control.add_child(input)
 
@@ -165,7 +165,7 @@ func _ready():
 
 func _input(event : InputEvent):
 	if event is InputEventKey:
-		if event.get_physical_keycode_with_modifiers() == activation_key:
+		if event.get_physical_keycode_with_modifiers() == ACTIVATION_KEY:
 			if event.pressed:
 				_toggle()
 			get_tree().get_root().set_input_as_handled()
@@ -239,18 +239,55 @@ func _submit_command(command_line : String):
 	else:
 		succeeded = false
 		result_msg = "unknown command"
-	
+
 	if succeeded:
-		_output_message(" ▶ " + command_line + " ▶ ✔️")
-		_output_message("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		if not last_command_result_as_string.is_empty():
-			_output_message(last_command_result_as_string)
-		if last_command_result_as_table != null:
-			_output_table(last_command_result_as_table)
+		output.append_text(" ▶ " + command_line + " ▶ ✔️")
 	else:
-		var error_msg = last_command_result_as_string if not last_command_result_as_string.is_empty() else result_msg
-		_output_message(" ▶ " + command_line + " ▶ ❌ ▶ " + error_msg)
-		_output_message("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		output.append_text(" ▶ " + command_line + " ▶ ❌ ▶ " + (last_command_result_as_string if not last_command_result_as_string.is_empty() else result_msg))
+	output.newline()
+
+	if not last_command_result_as_string.is_empty() and succeeded:
+		output.append_text(last_command_result_as_string)
+		output.newline()
+	if last_command_result_as_table != null:
+		# content row count + top line + bottom line
+		var row_count := last_command_result_as_table._row_count + 2
+		# content col count + content col count - 1 for intermadiate vertical lines between column + left line + right line => which can be simplified by result below
+		var col_count := last_command_result_as_table._col_count * 2 + 1
+		output.push_table(col_count)
+		var text_index := 0
+		for i in row_count:
+			for j in col_count:
+				output.push_cell()
+				if i == 0:
+					if j == 0:
+						output.append_text("┌")
+					elif j == col_count - 1:
+						output.append_text("┐")
+					elif j % 2 == 0:
+						output.append_text("┬")
+					else:
+						for k in last_command_result_as_table._max_text_length:
+							output.append_text("─")
+				elif i == row_count - 1:
+					if j == 0:
+						output.append_text("└")
+					elif j == col_count - 1:
+						output.append_text("┘")
+					elif j % 2 == 0:
+						output.append_text("┴")
+					else:
+						for k in last_command_result_as_table._max_text_length:
+							output.append_text("─")
+				else:
+					if j == 0 or j == col_count - 1 or j % 2 == 0:
+						output.append_text("│")
+					else:
+						output.append_text(last_command_result_as_table._cells[text_index])
+						text_index += 1
+				output.pop()
+		output.pop()
+		output.newline()
 	
 	last_command_result_as_string = ""
 	last_command_result_as_table = null
@@ -331,62 +368,6 @@ func _show_command_history_foreward():
 		else:
 			input.text = PROMPT_TEXT + command_history[command_history_index]
 			input.set_caret_column(input.text.length())
-
-
-func _output_error(message : String):
-	output.append_text("[color=green][/color][color=red]" + message + "[/color]")
-	output.newline()
-
-
-func _output_message(message : String):
-	output.append_text("[color=green]" + message + "[/color]")
-	output.newline()
-
-
-func _output_table(content : TableContent):
-	
-	# content row count + top line + bottom line
-	var row_count := content._row_count + 2
-	# content col count + content col count - 1 for intermadiate vertical lines between column + left line + right line => which can be simplified by result below
-	var col_count := content._col_count * 2 + 1
-	output.push_table(col_count)
-	var text_index := 0
-	for i in row_count:
-		for j in col_count:
-			output.push_cell()
-			if i == 0:
-				if j == 0:
-					output.append_text("[color=green]┌[/color]")
-				elif j == col_count - 1:
-					output.append_text("[color=green]┐[/color]")
-				elif j % 2 == 0:
-					output.append_text("[color=green]┬[/color]")
-				else:
-					for k in content._max_text_length:
-						output.append_text("[color=green]─[/color]")
-			elif i == row_count - 1:
-				if j == 0:
-					output.append_text("[color=green]└[/color]")
-				elif j == col_count - 1:
-					output.append_text("[color=green]┘[/color]")
-				elif j % 2 == 0:
-					output.append_text("[color=green]┴[/color]")
-				else:
-					for k in content._max_text_length:
-						output.append_text("[color=green]─[/color]")
-			else:
-				if j == 0:
-					output.append_text("[color=green]│[/color]")
-				elif j == col_count - 1:
-					output.append_text("[color=green]│[/color]")
-				elif j % 2 == 0:
-					output.append_text("[color=green]│[/color]")
-				else:
-					output.append_text("[color=green]" + content._cells[text_index] + "[/color]")
-					text_index += 1
-			output.pop()
-	output.pop()
-	output.newline()
 
 
 # API COMMANDS =================================================================
